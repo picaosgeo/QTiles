@@ -25,7 +25,6 @@
 #
 #******************************************************************************
 
-import os
 import sqlite3
 import zipfile
 
@@ -76,22 +75,24 @@ class ZipWriter:
 
 
 class MBTilesWriter:
-    def __init__(self, outputPath, rootDir, formatext, minZoom,maxZoom,extent):
+
+    def __init__(self, outputPath, rootDir, formatext, minZoom, maxZoom, extent, compression):
         self.output = outputPath
         self.rootDir = rootDir
+        self.compression = compression
         s = str(extent.xMinimum()) + ',' + str(extent.yMinimum()) + ',' + str(extent.xMaximum()) + ','+ str(extent.yMaximum())
         self.connection = mbtiles_connect(unicode(self.output.absoluteFilePath()))
         self.cursor = self.connection.cursor()
         optimize_connection(self.cursor)
         mbtiles_setup(self.cursor)
-        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''',('name',rootDir))
-        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''',('description',rootDir))
-        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''',('format',formatext))
-        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''',('minZoom',str(minZoom)))
-        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''',('maxZoom',str(maxZoom)))
-        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''',('type','baselayer'))
-        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''',('version','1.1'))
-        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''',('bounds',s))
+        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''', ('name', rootDir))
+        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''', ('description', 'Created with QTiles'))
+        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''', ('format', formatext.lower()))
+        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''', ('minZoom', str(minZoom)))
+        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''', ('maxZoom', str(maxZoom)))
+        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''', ('type', 'baselayer'))
+        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''', ('version', '1.1'))
+        self.cursor.execute('''INSERT INTO metadata(name, value) VALUES (?, ?);''', ('bounds', s))
         self.connection.commit()
 
     def writeTile(self, tile, image, format, quality):
@@ -105,5 +106,16 @@ class MBTilesWriter:
     def finalize(self):
         optimize_database(self.connection)
         self.connection.commit()
+        if self.compression:
+            # start compression
+            compression_prepare(self.cursor, self.connection)
+            self.cursor.execute("select count(zoom_level) from tiles")
+            res = self.cursor.fetchone()
+            total_tiles = res[0]
+            compression_do(self.cursor, self.connection, total_tiles)
+            compression_finalize(self.cursor)
+            optimize_database(self.connection)
+            self.connection.commit()
+            # end compression
         self.connection.close()
         self.cursor = None
